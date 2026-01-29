@@ -71,7 +71,7 @@ Each recording session is automatically assigned a new participant folder.
 ## 🛠 Requirements
 
 ### Software
-- Python **3.8+**
+- Python **3.8+** (Preferrably 3.11.7)
 - Beam Eye Tracker SDK
 - Beam Eye Tracker app **running and calibrated**
 - microsoft visual c++ redistributable x64/x86

@@ -1,0 +1,47 @@
+======================================================================
+ATTENTION ANALYTICS REPORT
+======================================================================
+
+PARTICIPANT INFORMATION
+----------------------------------------------------------------------
+Participant Number: 1
+Session Timestamp: 20260130_004014
+Output Folder: Participant_1
+
+
+SUMMARY
+----------------------------------------------------------------------
+Total Samples: 226.00
+Valid Samples: 226.00
+Validity Rate Percent: 100.00
+Total Duration Seconds: 15.00
+Attention Score: 100.00
+Average Sample Rate Hz: 15.06
+
+
+DISTRACTION ANALYSIS
+----------------------------------------------------------------------
+Total Distractions: 0
+Total Distraction Time: 0.00s
+Distraction Percentage: 0.00%
+Longest Distraction: 0.00s
+
+
+SPATIAL ANALYSIS
+----------------------------------------------------------------------
+Gaze Dispersion: 0.2535
+Fixation Stability: 0.7196
+Focus Quality Score: 53.72/100
+
+Attention Distribution by Region:
+  Region_0_0: 87.17%
+  Region_1_0: 0.44%
+  Region_1_1: 7.08%
+  Region_2_1: 5.31%
+
+
+TEMPORAL ANALYSIS
+----------------------------------------------------------------------
+Average Engagement: 100.00%
+
+======================================================================

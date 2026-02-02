@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "total_samples": 226,
+    "valid_samples": 226,
+    "validity_rate_percent": 100.0,
+    "total_duration_seconds": 15.003214836120605,
+    "attention_score": 100.0,
+    "average_sample_rate_hz": 15.063438234310922
+  },
+  "distraction_analysis": {
+    "distraction_count": 0,
+    "total_distraction_time_seconds": 0,
+    "distraction_percentage": 0.0,
+    "longest_distraction_seconds": 0,
+    "distraction_periods": []
+  },
+  "spatial_analysis": {
+    "gaze_dispersion": 0.25351663493906007,
+    "fixation_stability": 0.7196198105224187,
+    "focus_quality": 53.718421772329116,
+    "attention_distribution": {
+      "Region_1_1": 7.079646017699115,
+      "Region_2_1": 5.3097345132743365,
+      "Region_1_0": 0.4424778761061947,
+      "Region_0_0": 87.16814159292035
+    }
+  },
+  "temporal_analysis": {
+    "engagement_timeline": [
+      [
+        0.0,
+        100.0
+      ],
+      [
+        5.0,
+        100.0
+      ],
+      [
+        10.0,
+        100.0
+      ],
+      [
+        15.0,
+        100.0
+      ]
+    ],
+    "average_engagement": 100.0
+  },
+  "participant_info": {
+    "participant_number": 1,
+    "session_timestamp": "20260130_004014",
+    "output_folder": "attention_analysis\\Participant_1"
+  }
+}

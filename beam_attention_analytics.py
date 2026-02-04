@@ -83,10 +83,19 @@ except ImportError as e:
 class AttentionAnalytics:
     """Analyzes gaze data to quantify attention and detect distraction"""
     
-    def __init__(self, screen_width, screen_height):
+    def __init__(self, screen_width, screen_height, content_mode="landscape"):
         self.screen_width = screen_width
         self.screen_height = screen_height
+        self.content_mode = content_mode  # "portrait" or "landscape"
         self.gaze_history = []  # List of (timestamp, x, y, is_valid) tuples
+        
+        # Define valid regions based on content mode
+        if content_mode == "portrait":
+            # Portrait: Only center column (Region_0_1, Region_1_1, Region_2_1)
+            self.valid_regions = ["Region_0_1", "Region_1_1", "Region_2_1"]
+        else:
+            # Landscape: All regions are valid
+            self.valid_regions = [f"Region_{row}_{col}" for row in range(3) for col in range(3)]
         
     def add_sample(self, timestamp, x, y, is_valid):
         """Add a gaze sample with validity flag"""
@@ -110,32 +119,52 @@ class AttentionAnalytics:
     
     def detect_distraction_periods(self, threshold_seconds=2.0):
         """
-        Detect periods where user was distracted (lost tracking)
-        Returns list of (start_time, end_time, duration) tuples
+        Detect periods where user was distracted
+        - Lost tracking (not looking at screen)
+        - For portrait mode: looking at invalid regions (off-target)
+        Returns list of (start_time, end_time, duration, reason) tuples
         """
         distraction_periods = []
         in_distraction = False
         distraction_start = None
+        distraction_reason = None
         
         for i, (timestamp, x, y, is_valid) in enumerate(self.gaze_history):
-            if not is_valid and not in_distraction:
+            # Determine if this is a distraction
+            is_distracted = False
+            reason = None
+            
+            if not is_valid:
+                # Lost tracking - always counts as distraction
+                is_distracted = True
+                reason = "lost_tracking"
+            elif self.content_mode == "portrait" and is_valid:
+                # For portrait mode, check if looking at invalid region
+                if not self.is_looking_at_valid_region(x, y):
+                    is_distracted = True
+                    reason = "off_target"
+            
+            # State machine for distraction tracking
+            if is_distracted and not in_distraction:
                 # Start of distraction
                 in_distraction = True
                 distraction_start = timestamp
-            elif is_valid and in_distraction:
+                distraction_reason = reason
+            elif not is_distracted and in_distraction:
                 # End of distraction
                 duration = timestamp - distraction_start
                 if duration >= threshold_seconds:
-                    distraction_periods.append((distraction_start, timestamp, duration))
+                    distraction_periods.append((distraction_start, timestamp, duration, distraction_reason))
                 in_distraction = False
                 distraction_start = None
+                distraction_reason = None
         
-        # Handle case where tracking was lost at the end
+        # Handle case where distracted at the end
         if in_distraction and distraction_start is not None:
             last_timestamp = self.gaze_history[-1][0]
             duration = last_timestamp - distraction_start
             if duration >= threshold_seconds:
-                distraction_periods.append((distraction_start, last_timestamp, duration))
+                distraction_periods.append((distraction_start, last_timestamp, duration, distraction_reason))
         
         return distraction_periods
     
@@ -193,10 +222,26 @@ class AttentionAnalytics:
         
         return stability
     
+    def get_region_for_point(self, x, y, grid_size=3):
+        """Get the region name for a given point"""
+        grid_width = self.screen_width / grid_size
+        grid_height = self.screen_height / grid_size
+        
+        col = min(int(x / grid_width), grid_size - 1)
+        row = min(int(y / grid_height), grid_size - 1)
+        
+        return f"Region_{row}_{col}"
+    
+    def is_looking_at_valid_region(self, x, y):
+        """Check if gaze point is in a valid region based on content mode"""
+        region = self.get_region_for_point(x, y)
+        return region in self.valid_regions
+    
     def calculate_attention_distribution(self, grid_size=3):
         """
         Calculate how attention is distributed across screen regions
         Returns dictionary with region percentages
+        For portrait mode, separates valid regions from off-target regions
         """
         valid_points = [(x, y) for t, x, y, valid in self.gaze_history if valid]
         
@@ -208,15 +253,29 @@ class AttentionAnalytics:
         grid_height = self.screen_height / grid_size
         
         region_counts = {}
+        on_target_count = 0  # For portrait mode tracking
+        off_target_count = 0  # For portrait mode tracking
+        
         for x, y in valid_points:
             col = min(int(x / grid_width), grid_size - 1)
             row = min(int(y / grid_height), grid_size - 1)
             region_key = f"Region_{row}_{col}"
             region_counts[region_key] = region_counts.get(region_key, 0) + 1
+            
+            # Track if in valid region
+            if region_key in self.valid_regions:
+                on_target_count += 1
+            else:
+                off_target_count += 1
         
         # Convert to percentages
         total = len(valid_points)
         region_percentages = {k: (v / total * 100) for k, v in region_counts.items()}
+        
+        # Add summary stats for portrait mode
+        if self.content_mode == "portrait":
+            region_percentages["_on_target_percentage"] = (on_target_count / total * 100) if total > 0 else 0
+            region_percentages["_off_target_percentage"] = (off_target_count / total * 100) if total > 0 else 0
         
         return region_percentages
     
@@ -273,8 +332,15 @@ class AttentionAnalytics:
         distractions = self.detect_distraction_periods()
         total_distraction_time = sum(d[2] for d in distractions)
         
+        # Count distraction types for portrait mode
+        lost_tracking_count = sum(1 for d in distractions if d[3] == "lost_tracking")
+        off_target_count = sum(1 for d in distractions if d[3] == "off_target")
+        
         report["distraction_analysis"] = {
+            "content_mode": self.content_mode,
             "distraction_count": len(distractions),
+            "lost_tracking_count": lost_tracking_count,
+            "off_target_count": off_target_count if self.content_mode == "portrait" else 0,
             "total_distraction_time_seconds": total_distraction_time,
             "distraction_percentage": (total_distraction_time / total_duration * 100) if total_duration > 0 else 0,
             "longest_distraction_seconds": max([d[2] for d in distractions]) if distractions else 0,
@@ -282,10 +348,15 @@ class AttentionAnalytics:
                 {
                     "start_time": d[0],
                     "end_time": d[1],
-                    "duration": d[2]
+                    "duration": d[2],
+                    "reason": d[3]
                 } for d in distractions
             ]
         }
+        
+        # Add portrait mode specific info
+        if self.content_mode == "portrait":
+            report["distraction_analysis"]["valid_regions"] = self.valid_regions
         
         # Spatial analysis
         dispersion = self.calculate_gaze_dispersion()
@@ -312,9 +383,10 @@ class AttentionAnalytics:
 class RealtimeHeatmapVideoGenerator:
     """Collects gaze data and generates a real-time heatmap video with analytics"""
     
-    def __init__(self, screen_width=1920, screen_height=1080, app_name="Attention Analytics"):
+    def __init__(self, screen_width=1920, screen_height=1080, content_mode="landscape", app_name="Attention Analytics"):
         self.screen_width = screen_width
         self.screen_height = screen_height
+        self.content_mode = content_mode  # "portrait" or "landscape"
         self.gaze_points = []
         self.start_time = None
         self.is_tracking = False
@@ -322,8 +394,8 @@ class RealtimeHeatmapVideoGenerator:
         self.last_update_timestamp = None
         self.session_number = 1
         
-        # Analytics
-        self.analytics = AttentionAnalytics(screen_width, screen_height)
+        # Analytics with content mode
+        self.analytics = AttentionAnalytics(screen_width, screen_height, content_mode)
         
         # Video settings
         self.video_width = 800
@@ -353,7 +425,7 @@ class RealtimeHeatmapVideoGenerator:
         """Reset data for a new recording session"""
         self.session_number = session_number
         self.gaze_points = []
-        self.analytics = AttentionAnalytics(self.screen_width, self.screen_height)
+        self.analytics = AttentionAnalytics(self.screen_width, self.screen_height, self.content_mode)
         self.start_time = None
         self.is_tracking = False
         
@@ -574,6 +646,36 @@ class RealtimeHeatmapVideoGenerator:
         cv2.putText(frame, title, (title_x, legend_y - 8), 
                    font, 0.4, (255, 255, 255), 1)
         
+        # Add portrait mode indicator if applicable
+        if self.content_mode == "portrait":
+            # Draw vertical lines showing valid region (center third)
+            center_left = self.video_width // 3
+            center_right = 2 * self.video_width // 3
+            
+            # Draw semi-transparent overlay for off-target areas
+            overlay = frame.copy()
+            
+            # Left off-target zone (red tint)
+            cv2.rectangle(overlay, (0, 0), (center_left, self.video_height), (0, 0, 100), -1)
+            # Right off-target zone (red tint)
+            cv2.rectangle(overlay, (center_right, 0), (self.video_width, self.video_height), (0, 0, 100), -1)
+            
+            # Blend overlay
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+            
+            # Draw boundary lines
+            cv2.line(frame, (center_left, 0), (center_left, self.video_height), (0, 255, 0), 2)
+            cv2.line(frame, (center_right, 0), (center_right, self.video_height), (0, 255, 0), 2)
+            
+            # Add "PORTRAIT MODE" label
+            mode_text = "PORTRAIT MODE"
+            mode_size = cv2.getTextSize(mode_text, font, 0.5, 2)[0]
+            mode_x = (self.video_width - mode_size[0]) // 2
+            cv2.rectangle(frame, (mode_x - 5, self.video_height - 35), 
+                         (mode_x + mode_size[0] + 5, self.video_height - 10), (0, 100, 0), -1)
+            cv2.putText(frame, mode_text, (mode_x, self.video_height - 15), 
+                       font, 0.5, (255, 255, 255), 2)
+        
         return frame
     
     def add_gaze_point(self, timestamp, x, y, is_valid):
@@ -669,6 +771,7 @@ class RealtimeHeatmapVideoGenerator:
             "participant_number": self.participant_num,
             "session_number": self.session_number,
             "session_timestamp": self.session_timestamp,
+            "content_mode": self.content_mode,
             "output_folder": str(self.output_folder)
         }
         
@@ -688,6 +791,7 @@ class RealtimeHeatmapVideoGenerator:
             f.write("-" * 70 + "\n")
             f.write(f"Participant Number: {self.participant_num}\n")
             f.write(f"Session Number: {self.session_number}\n")
+            f.write(f"Content Mode: {self.content_mode.upper()}\n")
             f.write(f"Session Timestamp: {self.session_timestamp}\n")
             f.write(f"Output Folder: {self.output_folder.name}\n")
             
@@ -698,6 +802,11 @@ class RealtimeHeatmapVideoGenerator:
             
             f.write("\n\nDISTRACTION ANALYSIS\n")
             f.write("-" * 70 + "\n")
+            f.write(f"Content Mode: {report['distraction_analysis']['content_mode']}\n")
+            if report['distraction_analysis']['content_mode'] == "portrait":
+                f.write(f"Valid Regions: {', '.join(report['distraction_analysis']['valid_regions'])}\n")
+                f.write(f"Lost Tracking Distractions: {report['distraction_analysis']['lost_tracking_count']}\n")
+                f.write(f"Off-Target Distractions: {report['distraction_analysis']['off_target_count']}\n")
             f.write(f"Total Distractions: {report['distraction_analysis']['distraction_count']}\n")
             f.write(f"Total Distraction Time: {report['distraction_analysis']['total_distraction_time_seconds']:.2f}s\n")
             f.write(f"Distraction Percentage: {report['distraction_analysis']['distraction_percentage']:.2f}%\n")
@@ -706,7 +815,8 @@ class RealtimeHeatmapVideoGenerator:
             if report['distraction_analysis']['distraction_periods']:
                 f.write("\nDistraction Periods:\n")
                 for i, period in enumerate(report['distraction_analysis']['distraction_periods'], 1):
-                    f.write(f"  {i}. {period['start_time']:.2f}s - {period['end_time']:.2f}s (duration: {period['duration']:.2f}s)\n")
+                    reason_text = f" ({period['reason']})" if 'reason' in period else ""
+                    f.write(f"  {i}. {period['start_time']:.2f}s - {period['end_time']:.2f}s (duration: {period['duration']:.2f}s){reason_text}\n")
             
             f.write("\n\nSPATIAL ANALYSIS\n")
             f.write("-" * 70 + "\n")
@@ -715,8 +825,24 @@ class RealtimeHeatmapVideoGenerator:
             f.write(f"Focus Quality Score: {report['spatial_analysis']['focus_quality']:.2f}/100\n")
             
             f.write("\nAttention Distribution by Region:\n")
-            for region, percentage in sorted(report['spatial_analysis']['attention_distribution'].items()):
-                f.write(f"  {region}: {percentage:.2f}%\n")
+            dist = report['spatial_analysis']['attention_distribution']
+            
+            # Show on/off target summary for portrait mode first
+            if self.content_mode == "portrait" and "_on_target_percentage" in dist:
+                f.write(f"\n  ON-TARGET (Valid Regions):  {dist['_on_target_percentage']:.2f}%\n")
+                f.write(f"  OFF-TARGET (Invalid Regions): {dist['_off_target_percentage']:.2f}%\n\n")
+            
+            # Show individual regions
+            for region, percentage in sorted(dist.items()):
+                if not region.startswith("_"):  # Skip summary stats
+                    # Mark if valid for portrait mode
+                    valid_marker = ""
+                    if self.content_mode == "portrait":
+                        if region in self.analytics.valid_regions:
+                            valid_marker = " ✓ (VALID)"
+                        else:
+                            valid_marker = " ✗ (OFF-TARGET)"
+                    f.write(f"  {region}: {percentage:.2f}%{valid_marker}\n")
             
             f.write("\n\nTEMPORAL ANALYSIS\n")
             f.write("-" * 70 + "\n")
@@ -758,9 +884,39 @@ def main():
         print("Invalid input. Using default 1920x1080")
         width, height = 1920, 1080
     
-    # Initialize tracker once
+    # Ask for content mode
+    print("\n" + "="*70)
+    print("CONTENT MODE SELECTION")
+    print("="*70)
+    print("Will you be showing PORTRAIT or LANDSCAPE content?")
+    print()
+    print("Portrait mode:")
+    print("  - Only tracks center column (Region_0_1, Region_1_1, Region_2_1)")
+    print("  - Looking at side regions = OFF-TARGET distraction")
+    print("  - Use for: TikTok, Instagram Reels, vertical videos")
+    print()
+    print("Landscape mode:")
+    print("  - Tracks all screen regions equally")
+    print("  - Use for: YouTube, presentations, websites, games")
+    print()
+    
+    while True:
+        content_mode_input = input("Enter mode (P=Portrait, L=Landscape) [default: L]: ").strip().upper()
+        
+        if content_mode_input == "P":
+            content_mode = "portrait"
+            print("✓ Portrait mode selected - Center column tracking only")
+            break
+        elif content_mode_input == "L" or content_mode_input == "":
+            content_mode = "landscape"
+            print("✓ Landscape mode selected - Full screen tracking")
+            break
+        else:
+            print("Invalid input. Please enter P or L.")
+    
+    # Initialize tracker with content mode
     try:
-        tracker = RealtimeHeatmapVideoGenerator(width, height)
+        tracker = RealtimeHeatmapVideoGenerator(width, height, content_mode)
     except Exception as e:
         print(f"\nFailed to initialize: {e}")
         return
